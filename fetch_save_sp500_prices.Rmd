@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Get the list of S&P 500 stocks
+
+
+```{r}
+library(tidyverse)
+library(tidyquant)
+
+companies <- tq_index("SP500")
+companies <- companies |>
+  filter(symbol != "-")
+companies |> write_tsv("data/sp500_list_2026-04-01.tsv")
+
+companies |>
+  slice_head(n = 3)
+```
+
+
+
+### Get their prices
+
+
+```{r}
+library(duckdb)
+
+conn <- dbConnect(duckdb(), dbdir = "data/sp500_prices_2026-04-01.duckdb", read_only = FALSE)
+
+df_prices <- companies |>
+  # slice_sample(n = 5) |>
+  select(symbol) |>
+  tq_get(get = "stock.prices", from = "2023-01-01")
+
+dbWriteTable(conn = conn, "prices", df_prices)
+
+res <- dbGetQuery(conn = conn, "FROM prices LIMIT 3")
+
+res
+
+# df_prices |> write_tsv("data/sp500_prices_2026-04-01.tsv")
+```
+
