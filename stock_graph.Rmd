@@ -8,7 +8,7 @@ library(duckdb)
 library(tidyverse)
 library(tidyquant)
 
-conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-01.duckdb")
+conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-01.duckdb", read_only = TRUE)
 dbGetQuery(conn, "FROM prices LIMIT 3")
 # dbGetQuery(conn, "select count(*) from prices;")
 ```
@@ -29,5 +29,34 @@ df_returns <- tbl(conn, "prices") |>
 df_returns |> slice_head(n = 2)
 ```
 
+```{r}
+df_returns |> count() |> filter(n < 812)
+```
 
+
+```{r}
+symbol_pairs <- df_returns |> select(symbol) |> distinct() |> pull()
+symbol_pairs <- expand_grid(symbol1 = symbol_pairs, symbol2 = symbol_pairs) |>
+  filter(symbol1 < symbol2) # |>
+  # slice_head(n = 3)
+# symbol_pairs
+returns12 <- symbol_pairs |>
+  left_join(df_returns, join_by(symbol1 == symbol)) |>
+  rename(return1 = daily.returns) |>
+  left_join(df_returns, join_by(symbol2 == symbol, date == date)) |>
+  rename(return2 = daily.returns)
+
+returns12 |> slice_head(n = 5)
+```
+## Aggregate
+
+```{r}
+cor_return12 <- function(x, y) {
+  return(cor(x, y))
+}
+
+returns12 |>
+  group_by(symbol1, symbol2) |>
+  summarise(correlation = cor_return12(return1, return2))
+```
 
