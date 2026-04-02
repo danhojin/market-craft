@@ -1,0 +1,33 @@
+---
+title: "Graph analytics of stock market"
+output: html_notebook
+---
+
+```{r}
+library(duckdb)
+library(tidyverse)
+library(tidyquant)
+
+conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-01.duckdb")
+dbGetQuery(conn, "FROM prices LIMIT 3")
+# dbGetQuery(conn, "select count(*) from prices;")
+```
+
+```{r}
+df_returns <- tbl(conn, "prices") |>
+  as_tibble() |>
+  group_by(symbol) |>
+  tq_transmute(
+    select = adjusted,
+    mutate_fun = periodReturn,
+    period = "daily",
+    type = "log",
+    leading = FALSE
+  ) |>
+  drop_na()
+
+df_returns |> slice_head(n = 2)
+```
+
+
+
