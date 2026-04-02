@@ -13,7 +13,7 @@ library(tidyquant)
 companies <- tq_index("SP500")
 companies <- companies |>
   filter(symbol != "-")
-companies |> write_tsv("data/sp500_list_2026-04-01.tsv")
+companies |> write_tsv("data/sp500_list_2026-04-03.tsv")
 
 companies |>
   slice_head(n = 3)
@@ -27,7 +27,7 @@ companies |>
 ```{r}
 library(duckdb)
 
-conn <- dbConnect(duckdb(), dbdir = "data/sp500_prices_2026-04-01.duckdb", read_only = FALSE)
+conn <- dbConnect(duckdb(), dbdir = "data/sp500_prices_2026-04-03.duckdb", read_only = FALSE)
 
 df_prices <- companies |>
   # slice_sample(n = 5) |>
