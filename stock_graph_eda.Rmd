@@ -1,0 +1,236 @@
+---
+title: "Graph analytics of stock market"
+output: html_notebook
+---
+
+```{r}
+library(duckdb)
+library(tidyverse)
+library(tidyquant)
+
+conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-03.duckdb", read_only = TRUE)
+dbGetQuery(conn, "FROM prices LIMIT 3")
+# dbGetQuery(conn, "select count(*) from prices;")
+```
+
+```{r}
+df_returns <- tbl(conn, "prices") |>
+  as_tibble() |>
+  # duplicated stocks
+  filter(!symbol %in% c("GOOGL", "FOXA", "NWSA")) |>
+  group_by(symbol) |>
+  tq_transmute(
+    select = adjusted,
+    mutate_fun = periodReturn,
+    period = "daily",
+    type = "log",
+    leading = FALSE
+  ) |>
+  drop_na()
+
+df_returns |> slice_head(n = 2)
+```
+
+
+```{r}
+df_prices <- tbl(conn, "prices") |>
+  as_tibble() |>
+  # duplicated stocks
+  filter(!symbol %in% c("GOOGL", "FOXA", "NWSA"))
+
+drop_names <- df_prices |> group_by(symbol) |> count() |> filter(n < 815) |> pull(symbol)
+df_prices_wide <- df_prices |>
+  group_by(symbol) |>
+  pivot_wider(id_cols = date, names_from = symbol, values_from = adjusted) |>
+  select(-date)
+```
+
+
+
+## Aggregate for undirected edges:
+
+```{r}
+library(infotheo)
+library(tseries)
+library(broom)
+
+# Some companies went ipo recently. They don't have enough data.
+drop_names <- df_returns |> count() |> filter(n < 812) |> pull(symbol)
+
+df_returns_wide <- df_returns |>
+  filter(! symbol %in% drop_names) |>
+  pivot_wider(id_cols = date, names_from = symbol, values_from = daily.returns) |>
+  select(-date)
+
+cor_return12 <- function(x, y) {
+  return(cor(x, y))
+}
+
+mi_return12 <- function(x, y) {
+  df <- discretize(tibble(x = x, y = y))
+  mutinformation(df[,1], df[,2])
+}
+
+coint_p <- function(x, y) {
+  model <- lm(y ~ x)
+  res <- residuals(model)
+  adf.test(res) |>
+    tidy() |>
+    pull(p.value)
+}
+
+df_weights <- expand_grid(symbol1 = names(df_returns_wide), symbol2 = names(df_returns_wide)) |>
+  filter(symbol1 < symbol2) |>
+  # slice_sample(n = 5) |>
+  rowwise() |>
+  mutate(
+    correlation = cor_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]]),
+    mutual_information = mi_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]]),
+    cointegration = coint_p(df_prices_wide[[symbol1]], df_prices_wide[[symbol2]])
+  ) |>
+  ungroup() # un-rowwise
+
+df_weights |>
+  ggplot(aes(x = correlation, y = mutual_information)) +
+  geom_point() +
+  labs(x = "Correlation", y = "Mutual Information") +
+  theme_light()
+```
+
+```{r}
+df_weights |>
+  ggplot(aes(x = correlation, y = cointegration)) +
+  geom_point() +
+  labs(x = "Correlation", y = "Mutual Information") +
+  theme_light()
+```
+
+
+
+### threshold for correlated stocks
+
+
+```{r}
+df_weights |>
+  pivot_longer(cols = c(correlation, mutual_information), names_to = "metric") |>
+  ggplot(aes(x = value, color = metric)) +
+  # geom_density() +
+  stat_ecdf() +
+  labs(x = "Relation strength") +
+  theme_light()
+```
+
+```{r}
+df_weights |>
+  filter(correlation > 0.3) |>
+  count() |>
+  mutate(frac = n / nrow(df_weights))
+```
+
+```{r}
+df_weights |>
+  arrange(desc(correlation)) |>
+  slice_head(n = 20)
+```
+
+
+
+# for last 6 months
+
+```{r}
+library(lubridate)
+library(infotheo)
+
+df_returns |>
+  filter(date > ymd(20250901)) |>
+  count() |>
+  filter(n < 148)  # FISV, Q
+
+df_returns_wide <- df_returns |>
+  filter(! symbol %in% c("FISV", "Q")) |>
+  pivot_wider(id_cols = date, names_from = symbol, values_from = daily.returns) |>
+  select(-date)
+
+df_prices_wide <- df_prices |>
+  filter(! symbol %in% c("FISV", "Q"),
+         date > ymd(20250901)) |>
+  group_by(symbol) |>
+  pivot_wider(id_cols = date, names_from = symbol, values_from = adjusted) |>
+  select(-date)
+
+df_weights <- expand_grid(symbol1 = names(df_returns_wide), symbol2 = names(df_returns_wide)) |>
+  filter(symbol1 < symbol2) |>
+  # slice_sample(n = 5) |>
+  rowwise() |>
+  mutate(
+    correlation = cor_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]]),
+    mutual_information = mi_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]]),
+    cointegration = coint_p(df_prices_wide[[symbol1]], df_prices_wide[[symbol2]])
+  ) |>
+  ungroup() # un-rowwise
+
+df_weights |>
+  ggplot(aes(x = correlation, y = mutual_information)) +
+  geom_point() +
+  labs(x = "Correlation", y = "Mutual Information") +
+  theme_light()
+```
+
+
+```{r}
+df_weights |>
+  pivot_longer(cols = c(correlation, mutual_information), names_to = "metric") |>
+  ggplot(aes(x = value, color = metric)) +
+  # geom_density() +
+  stat_ecdf() +
+  labs(x = "Relation strength") +
+  theme_light()
+```
+
+
+```{r}
+df_weights |>
+  ggplot(aes(x = correlation, y = cointegration)) +
+  geom_point() +
+  labs(x = "Correlation", y = "Mutual Information") +
+  theme_light()
+```
+
+```{r}
+df_weights |>
+  filter(correlation > 0.6, cointegration > 0.7) |>
+  arrange(-cointegration)
+```
+
+
+## Aggregate approach 1: Do not run
+
+slow & memory hungry.
+archived as a reference.
+
+```{r}
+symbol_pairs <- df_returns |> select(symbol) |> distinct() |> pull()
+symbol_pairs <- expand_grid(symbol1 = symbol_pairs, symbol2 = symbol_pairs) |>
+  filter(symbol1 < symbol2) # |>
+  # slice_head(n = 3)
+# symbol_pairs
+returns12 <- symbol_pairs |>
+  left_join(df_returns, join_by(symbol1 == symbol)) |>
+  rename(return1 = daily.returns) |>
+  left_join(df_returns, join_by(symbol2 == symbol, date == date)) |>
+  rename(return2 = daily.returns)
+
+returns12 |> slice_head(n = 5)
+```
+
+
+```{r}
+cor_return12 <- function(x, y) {
+  return(cor(x, y))
+}
+
+returns12 |>
+  group_by(symbol1, symbol2) |>
+  summarise(correlation = cor_return12(return1, return2))
+```
+
