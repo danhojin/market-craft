@@ -8,7 +8,7 @@ library(duckdb)
 library(tidyverse)
 library(tidyquant)
 
-conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-01.duckdb", read_only = TRUE)
+conn <- dbConnect(duckdb(), "data/sp500_prices_2026-04-03.duckdb", read_only = TRUE)
 dbGetQuery(conn, "FROM prices LIMIT 3")
 # dbGetQuery(conn, "select count(*) from prices;")
 ```
@@ -29,10 +29,66 @@ df_returns <- tbl(conn, "prices") |>
 df_returns |> slice_head(n = 2)
 ```
 
+
+
+## Aggregate for undirected edges:
+
 ```{r}
-df_returns |> count() |> filter(n < 812)
+library(infotheo)
+
+# Some companies went ipo recently. They don't have enough data.
+drop_names <- df_returns |> count() |> filter(n < 812) |> pull(symbol)
+
+df_returns_wide <- df_returns |>
+  filter(! symbol %in% drop_names) |>
+  pivot_wider(id_cols = date, names_from = symbol, values_from = daily.returns) |>
+  select(-date)
+
+cor_return12 <- function(x, y) {
+  return(cor(x, y))
+}
+
+mi_return12 <- function(x, y) {
+  df <- discretize(tibble(x = x, y = y), nbins = 20)
+  mutinformation(df[,1], df[,2])
+}
+
+df_weights <- expand_grid(symbol1 = names(df_returns_wide), symbol2 = names(df_returns_wide)) |>
+  filter(symbol1 < symbol2) |>
+  # slice_sample(n = 5) |>
+  rowwise() |>
+  mutate(
+    correlation = cor_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]]),
+    mutual_information = mi_return12(df_returns_wide[[symbol1]], df_returns_wide[[symbol2]])
+  ) |>
+  ungroup() # un-rowwise
+
+df_weights |>
+  ggplot(aes(x = correlation, y = mutual_information)) +
+  geom_point() +
+  labs(x = "Correlation", y = "Mutual Information") +
+  theme_light()
 ```
 
+### threshold for correlated stocks
+
+
+```{r}
+df_weights |>
+  pivot_longer(cols = c(correlation, mutual_information), names_to = "metric") |>
+  ggplot(aes(x = value, color = metric)) +
+  # geom_density() +
+  stat_ecdf() +
+  labs(x = "Relation strength") +
+  theme_light()
+```
+
+
+
+## Aggregate approach 1: Do not run
+
+slow & memory hungry.
+archived as a reference.
 
 ```{r}
 symbol_pairs <- df_returns |> select(symbol) |> distinct() |> pull()
@@ -48,7 +104,7 @@ returns12 <- symbol_pairs |>
 
 returns12 |> slice_head(n = 5)
 ```
-## Aggregate
+
 
 ```{r}
 cor_return12 <- function(x, y) {
