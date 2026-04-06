@@ -49,6 +49,8 @@ df_prices_wide <- df_prices |>
 
 ## Aggregate for undirected edges:
 
+
+
 ```{r}
 library(infotheo)
 library(tseries)
@@ -101,7 +103,7 @@ df_weights |>
 df_weights |>
   ggplot(aes(x = correlation, y = cointegration)) +
   geom_point() +
-  labs(x = "Correlation", y = "Mutual Information") +
+  labs(x = "Correlation", y = "Pair tradable") +
   theme_light()
 ```
 
@@ -140,6 +142,25 @@ df_weights |>
 ```{r}
 library(lubridate)
 library(infotheo)
+library(tseries)
+library(broom)
+
+cor_return12 <- function(x, y) {
+  cor(x, y, use = "pairwise.complete.obs")
+}
+
+mi_return12 <- function(x, y) {
+  df <- discretize(tibble(x = x, y = y))
+  mutinformation(df[,1], df[,2])
+}
+
+coint_p <- function(x, y) {
+  model <- lm(y ~ x)
+  res <- residuals(model)
+  adf.test(res) |>
+    tidy() |>
+    pull(p.value)
+}
 
 df_returns |>
   filter(date > ymd(20250901)) |>
@@ -192,7 +213,7 @@ df_weights |>
 df_weights |>
   ggplot(aes(x = correlation, y = cointegration)) +
   geom_point() +
-  labs(x = "Correlation", y = "Mutual Information") +
+  labs(x = "Correlation", y = "Pair tradable") +
   theme_light()
 ```
 
@@ -201,6 +222,22 @@ df_weights |>
   filter(correlation > 0.6, cointegration > 0.7) |>
   arrange(-cointegration)
 ```
+
+
+```{r}
+df_weights |>
+  summarise(across(everything(), \(col) sum(is.na(col))))
+```
+
+
+
+```{r}
+df_weights |>
+  rename(Source = symbol1, Target = symbol2) |>
+  mutate(across(where(is.numeric), \(x) format(round(x, 4), nsmall = 4))) |>
+  write_csv("data/edge_weights.csv")
+```
+
 
 
 ## Aggregate approach 1: Do not run
